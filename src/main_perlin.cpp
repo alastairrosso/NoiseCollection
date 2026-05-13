@@ -4,16 +4,17 @@
 
 #include "glm/glm.hpp"
 
-#define REG_LEN 10
-#define REG_PER_ROW 5
-#define GRAD_PER_ROW (REG_PER_ROW+1)
-#define G(x, y, size) (y)*(size) + (x)
+#define REGION_SIZE 10
+#define GRID_LEN_REGS 5
+#define GRID_LEN_GRADS (GRID_LEN_REGS+1)
+#define GRID_LEN ((REGION_SIZE)*(GRID_LEN_REGS))
+#define G(x, y, size) ((y)*(size) + (x))
 
 using namespace glm;
 using namespace std;
 
 char vtoa(float brightness) {
-    char asc[] = ".;;??&&&@@@";
+    char asc[] = ".;?&&@@@";
     int discr = (int) floor(abs(brightness * 10.0f));
     if (discr > 10) return '@';
     return asc[discr];
@@ -23,22 +24,22 @@ float smoothStep(float t) {
     return t*t*t*(t*(t*(6)-15) + 10);
 }
 
-void genRegion(vector<float>& grid, vector<vec2>& grads, vec2 pos_g_00) {
-    float rec_reg_size = 1.0f / REG_LEN;
+void genRegion(vector<float>& grid, vector<vec2>& grads, int pos_00x, int pos_00y) {
+    float RECIP_REGION_SIZE = 1.0f / REGION_SIZE;
 
-    vec2 g_00 = grads[G(pos_g_00.x, pos_g_00.y, GRAD_PER_ROW)];
-    vec2 g_01 = grads[G(pos_g_00.x, pos_g_00.y+1, GRAD_PER_ROW)];
-    vec2 g_10 = grads[G(pos_g_00.x+1, pos_g_00.y, GRAD_PER_ROW)];
-    vec2 g_11 = grads[G(pos_g_00.x+1, pos_g_00.y+1, GRAD_PER_ROW)];
+    vec2 g_00 = grads[G(pos_00x,   pos_00y,   GRID_LEN_GRADS)];
+    vec2 g_01 = grads[G(pos_00x,   pos_00y+1, GRID_LEN_GRADS)];
+    vec2 g_10 = grads[G(pos_00x+1, pos_00y,   GRID_LEN_GRADS)];
+    vec2 g_11 = grads[G(pos_00x+1, pos_00y+1, GRID_LEN_GRADS)];
 
-    for (int iv = 0; iv < REG_LEN; ++iv) {
-        for (int iu = 0; iu < REG_LEN; ++iu) {
-            float u = iu * rec_reg_size;
-            float v = iv * rec_reg_size;
+    for (int iv = 0; iv < REGION_SIZE; ++iv) {
+        for (int iu = 0; iu < REGION_SIZE; ++iu) {
+            float u = iu * RECIP_REGION_SIZE;
+            float v = iv * RECIP_REGION_SIZE;
 
-            vec2 r_00 = vec2(u, v);
-            vec2 r_01 = vec2(u, v-1);
-            vec2 r_10 = vec2(u-1, v);
+            vec2 r_00 = vec2(u,   v  );
+            vec2 r_01 = vec2(u,   v-1);
+            vec2 r_10 = vec2(u-1, v  );
             vec2 r_11 = vec2(u-1, v-1);
 
             float n_00 = dot(g_00, r_00);
@@ -50,16 +51,17 @@ void genRegion(vector<float>& grid, vector<vec2>& grads, vec2 pos_g_00) {
             float n_x1 = n_01*smoothStep(1-u) + n_11*smoothStep(u);
             float n_xy = n_x0*smoothStep(1-v) + n_x1*smoothStep(v);
 
-            grid[G(pos_g_00.x*REG_LEN + iu, pos_g_00.y*REG_LEN + iv, REG_LEN*REG_PER_ROW)] = n_xy;
+            int grid_x = pos_00x*REGION_SIZE + iu;
+            int grid_y = pos_00y*REGION_SIZE + iv;
+            grid[G(grid_x, grid_y, GRID_LEN)] = n_xy;
         }
     }
 }
 
 int main() {
-    int len_grid = REG_LEN*REG_PER_ROW * REG_LEN*REG_PER_ROW;
-    int len_grads = GRAD_PER_ROW * GRAD_PER_ROW;
-    vector<float> grid(len_grid);
-    vector<vec2> grads(len_grads);
+    const int GRAD_FIELD_SIZE = GRID_LEN_GRADS * GRID_LEN_GRADS;
+    vector<float> grid(GRID_LEN * GRID_LEN);
+    vector<vec2> grads(GRAD_FIELD_SIZE);
 
     // sample gradient vectors from fixed set of 8 directions
     // no hash function - just RNG
@@ -71,19 +73,21 @@ int main() {
     mt19937 rng;
     rng.seed(time(0));
     uniform_real_distribution<> dis(0, 8);
-    for (int i = 0; i < len_grads; ++i) {
+    for (int i = 0; i < GRAD_FIELD_SIZE; ++i) {
         grads[i] = directions[(int) floor(dis(rng))];
     }
 
-    for (int g_y = 0; g_y < REG_PER_ROW; ++g_y) {
-        for (int g_x = 0; g_x < REG_PER_ROW; ++g_x) {
-            genRegion(grid, grads, vec2(g_x, g_y));
+    // generate noise for each region
+    for (int g_y = 0; g_y < GRID_LEN_REGS; ++g_y) {
+        for (int g_x = 0; g_x < GRID_LEN_REGS; ++g_x) {
+            genRegion(grid, grads, g_x, g_y);
         }
     }
 
-    for (int y = (REG_PER_ROW*REG_LEN)-1; y >= 0; --y) {
-        for (int x = 0; x < REG_PER_ROW*REG_LEN; ++x) {
-            cout << vtoa(grid[G(x, y, REG_LEN*REG_PER_ROW)]) << " ";
+    // print noise grid
+    for (int y = GRID_LEN-1; y >= 0; --y) {
+        for (int x = 0; x < GRID_LEN; ++x) {
+            cout << vtoa(grid[G(x, y, GRID_LEN)]) << " ";
         }
         cout << endl;
     }
